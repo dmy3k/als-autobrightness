@@ -2,19 +2,21 @@ import dbus
 from threading import Timer
 from functools import partial
 
+from autobrightness.services.abstract import DBusService
 
-class NotificationsDBus:
+
+class NotificationsDBus(DBusService):
     def __init__(self) -> None:
+        super().__init__(dbus.SessionBus)
         self.interface: dbus.Interface | None = None
         self.notif_id: int = 0
         self.timer: Timer | None = None
 
     def run(self):
-        bus = dbus.SessionBus()
-        notif_proxy = bus.get_object(
+        proxy = self.try_get_object(
             "org.freedesktop.Notifications", "/org/freedesktop/Notifications"
         )
-        self.interface = dbus.Interface(notif_proxy, "org.freedesktop.Notifications")
+        self.interface = dbus.Interface(proxy, "org.freedesktop.Notifications")
 
     def stop(self):
         if self.notif_id:
@@ -26,11 +28,15 @@ class NotificationsDBus:
     def _validate(self, fn, notif_id, *args):
         if int(notif_id) == self.notif_id:
             self.notif_id = 0
-            fn()
+            fn(*args)
 
     def connect_notif_closed_signal(self, fn):
         bound_fn = partial(self._validate, fn)
         self.interface.connect_to_signal("NotificationClosed", bound_fn)
+
+    def connect_notif_action_signal(self, fn):
+        bound_fn = partial(self._validate, fn)
+        self.interface.connect_to_signal("ActionInvoked", bound_fn)
 
     def notify(self, title, body):
         if self.timer and not self.timer.finished.is_set():
@@ -46,7 +52,7 @@ class NotificationsDBus:
             "",
             title,
             body,
-            [],
-            {"urgency": 1, "resident": True},
-            3000,
+            ["undo", "Undo"],
+            {"urgency": 1, "resident": False},
+            5000,
         )

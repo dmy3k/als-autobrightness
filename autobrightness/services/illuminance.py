@@ -1,22 +1,30 @@
 import dbus
 
+from autobrightness.services.abstract import DBusService
 
-class SensorProxyDBus:
+
+class SensorProxyDBus(DBusService):
     def __init__(self) -> None:
+        super().__init__(dbus.SystemBus)
         self.props: dbus.Interface | None = None
         self.iface: dbus.Interface | None = None
         self.proxy = None
 
     def run(self):
-        bus = dbus.SystemBus()
-        self.proxy = bus.get_object("net.hadess.SensorProxy", "/net/hadess/SensorProxy")
-
+        self.proxy = self.try_get_object(
+            "net.hadess.SensorProxy", "/net/hadess/SensorProxy"
+        )
         self.props = dbus.Interface(self.proxy, "org.freedesktop.DBus.Properties")
         self.iface = dbus.Interface(self.proxy, "net.hadess.SensorProxy")
+
+        if not self.has_ambient_light:
+            raise RuntimeError("Ambient Light Sensor not available")
+
         self.iface.ClaimLight()
 
     def stop(self):
-        self.iface.ReleaseLight()
+        if self.iface:
+            self.iface.ReleaseLight()
 
     @property
     def has_ambient_light(self):

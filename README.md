@@ -17,10 +17,11 @@ Ongoing [merge request](https://invent.kde.org/plasma/powerdevil/-/merge_request
 ## Prerequisites
 
 Make sure your device has the sensor before proceeding with setup.
-Check packages below are installed (should be included in most distros)
+Check packages below are installed (should be pre-installed in most distros)
 
 ```bash
-sudo dnf install iio-sensor-proxy python3-dbus
+sudo dnf install iio-sensor-proxy python3-pip python3-dbus git
+systemctl status iio-sensor-proxy.service
 ```
 
 ## Install

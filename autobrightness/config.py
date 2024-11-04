@@ -5,7 +5,6 @@ StartLimitIntervalSec=30
 StartLimitBurst=10
 
 [Service]
-ExecStartPre=/bin/sleep 5
 ExecStart=python %h/.local/bin/autobrightnesscli
 Restart=on-failure
 RestartSec=5

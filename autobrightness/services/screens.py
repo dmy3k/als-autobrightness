@@ -1,13 +1,15 @@
-import logging
 import dbus
 import weakref
 
+from autobrightness.services.abstract import DBusService
 
-class ScreenBrightnessDBus:
+
+class ScreenBrightnessDBus(DBusService):
     def __init__(self, name: str, mngr: "ScreensDbus"):
+        super().__init__(dbus.SessionBus)
+
         self.name = name
         self.mngr = mngr
-        self.bus = dbus.SessionBus()
 
         self.proxy = self.bus.get_object(
             "org.kde.Solid.PowerManagement",
@@ -47,19 +49,15 @@ class ScreenBrightnessDBus:
         self.propsIface.connect_to_signal("PropertiesChanged", fn)
 
 
-class ScreensDbus:
+class ScreensDbus(DBusService):
     def __init__(self) -> None:
+        super().__init__(dbus.SessionBus)
+
         self._display: ScreenBrightnessDBus | None = None
         self.on_internal_display_change: callable | None = None
 
-        self.logger = logging.getLogger(__name__)
-        ch = logging.StreamHandler()
-        self.logger.addHandler(ch)
-        self.logger.setLevel(logging.INFO)
-
     def run(self):
-        self.bus = dbus.SessionBus()
-        self.proxy = self.bus.get_object(
+        self.proxy = self.try_get_object(
             "org.kde.Solid.PowerManagement",
             "/org/kde/ScreenBrightness",
         )
@@ -72,10 +70,13 @@ class ScreensDbus:
     def discover(self):
         all_names = self.proxy.Get("org.kde.ScreenBrightness", "DisplaysDBusNames")
         for name in all_names:
-            displ = ScreenBrightnessDBus(str(name), weakref.proxy(self))
-            if displ.is_internal:
-                self.internal_display = displ
-                break
+            try:
+                displ = ScreenBrightnessDBus(str(name), weakref.proxy(self))
+                if displ.is_internal:
+                    self.internal_display = displ
+                    break
+            except Exception as e:
+                self.logger.warn(e)
         else:
             self.internal_display = None
 

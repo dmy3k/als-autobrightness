@@ -33,16 +33,13 @@ class AutoBrightnessService:
         self.light_timeout = 1.0
 
         self.user_brightness_bias = 0
+        self.inhibited_by_powerdevil = False
         self.anim_bright_target = None
 
         self.lights = []
         self.twa = -1
 
         self.logger = logging.getLogger(__name__)
-
-        ch = logging.StreamHandler()
-        self.logger.addHandler(ch)
-        self.logger.setLevel(logging.INFO)
 
         self.light_event = Event()
         self.stop_event = Event()
@@ -58,14 +55,11 @@ class AutoBrightnessService:
             self.handle_sensor_props_change
         )
 
-        if not self.sensor_proxy_dbus.has_ambient_light:
-            raise RuntimeError("Ambient Light Sensor not available")
-
         self.screens_dbus.on_internal_display_change = self.on_screens_change
         self.screens_dbus.run()
 
         self.notif_dbus.run()
-        self.notif_dbus.connect_notif_closed_signal(self.handle_brightness_bias_clear)
+        self.notif_dbus.connect_notif_action_signal(self.handle_brightness_bias_clear)
 
         self.anim_thread.start()
 
@@ -83,7 +77,7 @@ class AutoBrightnessService:
         if display:
             self.display = display
             self.max_brightness = self.display.max_brightness
-            self.min_brightness = round(self.display.max_brightness * 0.1)
+            self.min_brightness = round(self.display.max_brightness * 0.05)
             self.current_brightness = self.display.brightness
             self.display.connect_brightness_changed_signal(
                 self.handle_brightness_change
@@ -112,8 +106,12 @@ class AutoBrightnessService:
         return round(self.brightness_range * 0.05)
 
     def get_recommended_brightness(self, bias=0):
+        if not self.brightness_range or self.twa < 0:
+            return self.current_brightness
+
         ratio = self.twa / self.max_illuminance
         adjusted_ratio = ratio**self.brightness_power
+
         v = round(adjusted_ratio * self.brightness_range + self.min_brightness) + bias
         return max(min(v, self.max_brightness), self.min_brightness)
 
@@ -159,7 +157,7 @@ class AutoBrightnessService:
                 signaled = self.light_event.wait(timeout)
                 self.light_event.clear()
 
-                if self.twa < 0:
+                if self.twa < 0 or self.inhibited_by_powerdevil:
                     continue
 
                 if not signaled and avg_changing:
@@ -196,32 +194,46 @@ class AutoBrightnessService:
                 self.logger.exception(e)
                 time.sleep(self.light_timeout)
 
-    def handle_brightness_bias_clear(self):
-        self.user_brightness_bias = 0
-        target = self.get_recommended_brightness()
-        self.display.set_brightness(target)
-        self.logger.debug(f"user_brightness_bias={self.user_brightness_bias}")
+    def handle_brightness_bias_clear(self, action, *args):
+        if action == "undo":
+            self.user_brightness_bias = 0
+            target = self.get_recommended_brightness()
+            self.display.set_brightness(target)
+            self.logger.debug(f"user_brightness_bias={self.user_brightness_bias}")
 
     def handle_brightness_change(self, source, value, *args, **kw):
         b = int(value["Brightness"]) if "Brightness" in value else None
         if b is None:
             return
 
-        if not self.anim_bright_target:
-            unbiased_target = self.get_recommended_brightness()
-            self.user_brightness_bias = b - unbiased_target
-
-            if self.user_brightness_bias:
-                p = self.user_brightness_bias / self.max_brightness
-                self.notif_dbus.notify(
-                    "Brightness set manually",
-                    f"Automatic brightness curve will be offset by {p:+.0%}. Close notification to revert",
-                )
-                self.logger.debug(f"user_brightness_bias={self.user_brightness_bias}")
-
         if self.anim_bright_target and b == self.anim_bright_target:
             self.anim_bright_target = None
             self.logger.debug("animate_brightness: end")
+
+        if not self.anim_bright_target:
+            prev_bias = self.user_brightness_bias
+            self.user_brightness_bias = b - self.get_recommended_brightness()
+
+            # heuristics around powerdevil behaviour dimming screen on idle timeout
+            # do not show notifications when dimming takes place
+            # https://github.com/KDE/powerdevil/blob/bfa2cf691acf37b60541cc61ae11e0fad7c0f816/daemon/actions/bundled/dimdisplay.cpp#L74
+            brightness_ratio = round(b / self.current_brightness, 2)
+
+            if brightness_ratio == 0.3 and self.user_brightness_bias < prev_bias:
+                self.inhibited_by_powerdevil = True
+                self.logger.debug(f"inhibited_by_powerdevil=True")
+
+            elif brightness_ratio == 3.33 and self.user_brightness_bias > prev_bias:
+                self.inhibited_by_powerdevil = False
+                self.logger.debug(f"inhibited_by_powerdevil=False")
+
+            elif abs(self.user_brightness_bias) >= self.brightness_threshold_delta:
+                p = self.user_brightness_bias / self.max_brightness
+                self.notif_dbus.notify(
+                    "Brightness set manually",
+                    f"Adaptive brightness curve is offset by {p:+.0%}",
+                )
+                self.logger.debug(f"user_brightness_bias={self.user_brightness_bias}")
 
         self.current_brightness = b
 

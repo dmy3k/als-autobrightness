@@ -1,11 +1,16 @@
 import logging
-from autobrightness.services.autobrightness import AutoBrightnessService
 from gi.repository import GLib
 from dbus.mainloop.glib import DBusGMainLoop
 import argparse
+import sys
+
+from autobrightness.services.autobrightness import AutoBrightnessService
 
 
 def main():
+    ch = logging.StreamHandler(sys.stdout)
+    logging.root.addHandler(ch)
+
     parser = argparse.ArgumentParser("autobrightnesscli")
     parser.add_argument(
         "--default-systemd-cfg",
@@ -31,7 +36,9 @@ def main():
     service = AutoBrightnessService()
 
     if args.verbose:
-        service.logger.setLevel(logging.DEBUG)
+        logging.root.setLevel(logging.DEBUG)
+    else:
+        logging.root.setLevel(logging.INFO)
 
     try:
         loop = GLib.MainLoop()
