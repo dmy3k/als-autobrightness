@@ -1,8 +1,7 @@
 # Adaptive brightness service
 
-Adaptive brightness service for laptops running KDE 6.
-
-Ongoing [merge request](https://invent.kde.org/plasma/powerdevil/-/merge_requests/199) will land adaptive brightness into `PowerDevil`. Until then current app aims to deliver similar functionality.
+Adaptive brightness service for laptops running linux with KDE 6 desktop.
+The project serves the purpose during the absense of official support in KWin or PowerDevil.
 
 ## Highlights
 
@@ -12,7 +11,7 @@ Ongoing [merge request](https://invent.kde.org/plasma/powerdevil/-/merge_request
 - Uses [time weighted average](https://www.timescale.com/blog/what-time-weighted-averages-are-and-why-you-should-care/) to smooth out brigtness changes
 - Runs unpriviledged
 - Allows end-user to set brightness to the liking (offsetting adaptive brightness)
-- Tested with Fedora 40, KDE Plasma 6.2
+- Tested with Fedora 40-41, KDE Plasma 6.2-6.3
 
 ## Prerequisites
 
@@ -52,6 +51,10 @@ pip uninstall autobrightness
 ```
 
 ## References
+
+### Outstanding issues and merge requests
+- PowerDevil - [Automatic screen brightness based on ambient light](https://invent.kde.org/plasma/powerdevil/-/issues/21)
+- Kwin - [automatic brightness adjustment](https://invent.kde.org/plasma/kwin/-/merge_requests/5876)
 
 ### Similar projects
 
