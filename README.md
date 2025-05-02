@@ -11,7 +11,7 @@ The project serves the purpose during the absense of official support in KWin or
 - Uses [time weighted average](https://www.timescale.com/blog/what-time-weighted-averages-are-and-why-you-should-care/) to smooth out brigtness changes
 - Runs unpriviledged
 - Allows end-user to set brightness to the liking (offsetting adaptive brightness)
-- Tested with Fedora 40-41, KDE Plasma 6.2-6.3
+- Tested with Fedora 40-42, KDE Plasma 6.2-6.3
 
 ## Prerequisites
 
