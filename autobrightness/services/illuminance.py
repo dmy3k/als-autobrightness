@@ -1,5 +1,4 @@
 import dbus
-
 from autobrightness.services.abstract import DBusService
 
 
@@ -30,6 +29,11 @@ class SensorProxyDBus(DBusService):
     def has_ambient_light(self):
         v = self.props.Get("net.hadess.SensorProxy", "HasAmbientLight")
         return bool(v)
+
+    @property
+    def light_level(self):
+        v = self.props.Get("net.hadess.SensorProxy", "LightLevel")
+        return int(v)
 
     def connect_props_changed_signal(self, fn: callable):
         self.props.connect_to_signal("PropertiesChanged", fn, sender_keyword="sender")

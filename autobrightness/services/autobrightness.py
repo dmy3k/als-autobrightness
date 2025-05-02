@@ -63,6 +63,8 @@ class AutoBrightnessService:
 
         self.anim_thread.start()
 
+        self.report_light_level(self.sensor_proxy_dbus.light_level)
+
     def stop(self):
         self.sensor_proxy_dbus.stop()
         self.notif_dbus.stop()
@@ -128,13 +130,11 @@ class AutoBrightnessService:
         else:
             return self.lights[0].val
 
-    def report_light_level(self, value=None):
+    def report_light_level(self, value: int):
         now = time.time()
 
-        if not value and self.lights and now - self.lights[-1].ts >= self.light_timeout:
+        if self.lights and now - self.lights[-1].ts >= self.light_timeout:
             value = self.lights[-1].val
-        elif not value:
-            return
 
         self.lights.append(Reading(ts=now, val=value))
 
@@ -143,7 +143,7 @@ class AutoBrightnessService:
         prev_twa = self.twa
         self.twa = round(self.calc_time_weighted_avg())
 
-        if abs(self.twa - prev_twa) > 1:
+        if abs(self.twa - prev_twa) > 1 or prev_twa < 0:
             self.light_event.set()
 
         self.logger.debug(f"light_level={value}, light_avg={self.twa}")
@@ -152,7 +152,7 @@ class AutoBrightnessService:
         while not self.stop_event.is_set():
             try:
                 avg_changing = self.lights and self.twa != self.lights[-1].val
-                timeout = self.light_timeout if avg_changing else None
+                timeout = self.light_timeout if avg_changing else 30.0
 
                 signaled = self.light_event.wait(timeout)
                 self.light_event.clear()
@@ -160,9 +160,8 @@ class AutoBrightnessService:
                 if self.twa < 0 or self.inhibited_by_powerdevil:
                     continue
 
-                if not signaled and avg_changing:
-                    # sensor reading timeout, report last known brightness
-                    self.report_light_level()
+                if not signaled:
+                    self.report_light_level(self.sensor_proxy_dbus.light_level)
 
                 target = self.get_recommended_brightness(bias=self.user_brightness_bias)
                 start = self.current_brightness

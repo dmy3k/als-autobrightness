@@ -36,7 +36,13 @@ def main():
     service = AutoBrightnessService()
 
     if args.verbose:
-        logging.root.setLevel(logging.DEBUG)
+        root = logging.getLogger()
+        hdlr = root.handlers[0]
+        fmt = logging.Formatter(
+            "%(asctime)s %(levelname)s %(module)s - %(funcName)s: %(message)s"
+        )
+        hdlr.setFormatter(fmt)
+        root.setLevel(logging.DEBUG)
     else:
         logging.root.setLevel(logging.INFO)
 
