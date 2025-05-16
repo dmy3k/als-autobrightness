@@ -36,7 +36,7 @@ class AutoBrightnessService:
         self.inhibited_by_powerdevil = False
         self.anim_bright_target = None
 
-        self.lights = []
+        self.lights: list[Reading] = []
         self.twa = -1
 
         self.logger = logging.getLogger(__name__)
@@ -84,7 +84,9 @@ class AutoBrightnessService:
             self.display.connect_brightness_changed_signal(
                 self.handle_brightness_change
             )
-            self.logger.debug("Built-in display is enabled")
+            self.logger.debug(
+                f"Display '{self.display.label}' is enabled, max_brightness={self.max_brightness}"
+            )
         else:
             self.display = None
             self.max_brightness = 0
@@ -107,11 +109,11 @@ class AutoBrightnessService:
     def brightness_threshold_delta(self):
         return round(self.brightness_range * 0.05)
 
-    def get_recommended_brightness(self, bias=0):
+    def get_recommended_brightness(self, bias=0, twa=None):
         if not self.brightness_range or self.twa < 0:
             return self.current_brightness
 
-        ratio = self.twa / self.max_illuminance
+        ratio = (self.twa if twa is None else twa) / self.max_illuminance
         adjusted_ratio = ratio**self.brightness_power
 
         v = round(adjusted_ratio * self.brightness_range + self.min_brightness) + bias
@@ -130,38 +132,47 @@ class AutoBrightnessService:
         else:
             return self.lights[0].val
 
-    def report_light_level(self, value: int):
+    @property
+    def event_wait_timeout(self):
+        if not self.lights or self.lights[-1].val == self.twa:
+            return self.avg_period * 3
+
+        brightness = self.get_recommended_brightness(
+            bias=self.user_brightness_bias, twa=self.lights[-1].val
+        )
+        expect_animation = (
+            abs(brightness - self.current_brightness) > self.brightness_threshold_delta
+        )
+        return self.light_timeout if expect_animation else self.avg_period * 3
+
+    def report_light_level(self, value: int, trigger_event: bool = True):
         now = time.time()
-
-        if self.lights and now - self.lights[-1].ts >= self.light_timeout:
-            value = self.lights[-1].val
-
         self.lights.append(Reading(ts=now, val=value))
 
         ref_t = now - self.avg_period
         self.lights = [x for x in self.lights if x.ts > ref_t] or self.lights[-1:]
         prev_twa = self.twa
-        self.twa = round(self.calc_time_weighted_avg())
 
-        if abs(self.twa - prev_twa) > 1 or prev_twa < 0:
-            self.light_event.set()
+        if value != self.twa:
+            self.twa = round(self.calc_time_weighted_avg())
+            if trigger_event and abs(self.twa - prev_twa) > 1 or prev_twa < 0:
+                self.light_event.set()
 
-        self.logger.debug(f"light_level={value}, light_avg={self.twa}")
+        self.logger.debug(
+            f"light_level={value}, light_avg={self.twa}, {trigger_event=}"
+        )
 
     def animate_brightness(self):
         while not self.stop_event.is_set():
             try:
-                avg_changing = self.lights and self.twa != self.lights[-1].val
-                timeout = self.light_timeout if avg_changing else 30.0
-
-                signaled = self.light_event.wait(timeout)
+                signaled = self.light_event.wait(self.event_wait_timeout)
                 self.light_event.clear()
 
                 if self.twa < 0 or self.inhibited_by_powerdevil:
                     continue
 
                 if not signaled:
-                    self.report_light_level(self.sensor_proxy_dbus.light_level)
+                    self.report_light_level(self.sensor_proxy_dbus.light_level, False)
 
                 target = self.get_recommended_brightness(bias=self.user_brightness_bias)
                 start = self.current_brightness
