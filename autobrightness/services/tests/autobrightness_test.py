@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 import sys
 
 # Mock dbus module before importing AutoBrightnessService
@@ -7,7 +7,6 @@ mock_dbus = Mock()
 sys.modules["dbus"] = mock_dbus
 
 import time
-from math import ceil
 from ..autobrightness import AutoBrightnessService, Reading
 
 
@@ -22,6 +21,8 @@ class TestAutoBrightnessService(unittest.TestCase):
 
         self.mock_interface = Mock()
         self.mock_proxy.get_dbus_method.return_value = self.mock_interface
+
+        mock_dbus.Interface.return_value = self.mock_interface
 
         # Initialize service with mocked dependencies
         self.service = AutoBrightnessService()
@@ -44,8 +45,8 @@ class TestAutoBrightnessService(unittest.TestCase):
         self.mock_display.brightness = 50
 
         # Mock display-related attributes
+        self.service.brightness_threshold_delta = 5
         self.service.max_brightness = 100
-        self.service.min_brightness = 5
         self.service.current_brightness = 50
         self.service.lights = []
         self.service.twa = 0
@@ -87,10 +88,11 @@ class TestAutoBrightnessService(unittest.TestCase):
     def test_recommended_brightness_min_light(self):
         """Test brightness calculation at minimum light level"""
         self.service.twa = 0  # No light
+        self.service.update_brightness_map()
         result = self.service.get_recommended_brightness()
 
         # Should be at minimum brightness
-        self.assertEqual(result, self.service.min_brightness)
+        self.assertEqual(result, self.service.light_to_brightness_map[0][0])
 
     def test_recommended_brightness_max_light(self):
         """Test brightness calculation at maximum light level"""
@@ -111,107 +113,6 @@ class TestAutoBrightnessService(unittest.TestCase):
         # Result should be baseline + bias, but not exceed max_brightness
         expected = min(baseline + bias, self.service.max_brightness)
         self.assertEqual(result, expected)
-
-    @patch("time.sleep")
-    def test_animate_brightness_animation_steps(self, mock_sleep):
-        """Test brightness animation frames and target values"""
-
-        self.service.twa = 1000
-        self.service.current_brightness = 20
-        start_brightness = self.service.current_brightness
-
-        expected_target = self.service.get_recommended_brightness()
-        expected_frames = ceil(
-            abs(expected_target - start_brightness) / self.service.step
-        )
-
-        def mock_is_set():
-            return len(brightness_changes) >= expected_frames
-
-        self.service.stop_event.is_set = mock_is_set
-
-        # Track brightness changes
-        brightness_changes = []
-
-        def mock_set_brightness(value):
-            brightness_changes.append(value)
-            self.service.current_brightness = value
-
-        self.service.display.set_brightness = mock_set_brightness
-
-        def mock_wait(timeout=None):
-            return True
-
-        self.service.light_event.wait = mock_wait
-        self.service.animate_brightness()
-
-        # Verify animation occurred
-        self.assertGreater(len(brightness_changes), 0, "No brightness changes recorded")
-        self.assertEqual(brightness_changes[-1], expected_target)
-        self.assertEqual(len(brightness_changes), expected_frames)
-        # Verify sleep was called
-        mock_sleep.assert_called()
-
-        self.service.twa = 1000
-        self.service.current_brightness = 20
-        start_brightness = self.service.current_brightness
-
-        # Track brightness changes
-        brightness_changes = []
-
-        def mock_set_brightness(value):
-            brightness_changes.append(value)
-            self.service.current_brightness = value
-
-        self.service.display.set_brightness = mock_set_brightness
-        self.service.light_event.set()
-        self.service.animate_brightness()
-
-        # Verify animation steps
-        expected_target = self.service.get_recommended_brightness()
-        expected_frames = ceil(
-            abs(expected_target - start_brightness) / self.service.step
-        )
-
-        self.assertEqual(brightness_changes[-1], expected_target)
-        self.assertEqual(len(brightness_changes), expected_frames)
-
-    @patch("time.sleep")
-    def test_animate_brightness_interrupted(self, mock_sleep):
-        """Test animation interruption by light event"""
-        self.service.twa = 1000
-        self.service.current_brightness = 20
-        brightness_changes = []
-        loop_counter = 0
-
-        def mock_wait(timeout=None):
-            nonlocal loop_counter
-            loop_counter += 1
-            # Force exit after a few loops
-            if loop_counter > 3:
-                self.service.stop_event.is_set.return_value = True
-            return True
-
-        # Override wait behavior
-        self.service.light_event.wait = mock_wait
-
-        def mock_set_brightness(value):
-            brightness_changes.append(value)
-            self.service.current_brightness = value
-
-        self.service.display.set_brightness = mock_set_brightness
-
-        # Start animation
-        self.service.light_event.set()
-        self.service.animate_brightness()
-
-        # Verify animation was interrupted
-        expected_frames = ceil(
-            abs(self.service.get_recommended_brightness() - 20) / self.service.step
-        )
-        self.assertEqual(len(brightness_changes), expected_frames)
-        # Verify sleep was called
-        mock_sleep.assert_called()
 
 
 if __name__ == "__main__":

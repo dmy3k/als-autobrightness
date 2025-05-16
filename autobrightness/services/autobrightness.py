@@ -25,19 +25,18 @@ class AutoBrightnessService:
 
         self.display: ScreenBrightnessDBus | None = None
         self.max_brightness = 0
-        self.min_brightness = 0
+        self.brightness_threshold_delta = 0
         self.current_brightness = 0
 
-        self.fps = 20
         self.avg_period = 10.0
-        self.light_timeout = 1.0
 
         self.user_brightness_bias = 0
         self.inhibited_by_powerdevil = False
         self.anim_bright_target = None
 
-        self.lights = []
+        self.lights: list[Reading] = []
         self.twa = -1
+        self.event_timeout_count = 0
 
         self.logger = logging.getLogger(__name__)
 
@@ -48,6 +47,8 @@ class AutoBrightnessService:
         self.screens_dbus = ScreensDbus()
         self.sensor_proxy_dbus = SensorProxyDBus()
         self.notif_dbus = NotificationsDBus()
+
+        self.light_to_brightness_map = []
 
     def run(self):
         self.sensor_proxy_dbus.run()
@@ -75,49 +76,65 @@ class AutoBrightnessService:
         if self.anim_thread.is_alive():
             self.anim_thread.join()
 
+    def update_brightness_map(self):
+        step = self.brightness_threshold_delta
+        min_b = round(step * 2)
+        self.light_to_brightness_map = [
+            (x, self.brightness_to_light(x))
+            for x in range(min_b, (self.max_brightness + step), step)
+        ]
+        self.logger.debug(f"{self.light_to_brightness_map=}")
+
+    def brightness_to_light(self, brightness: int):
+        adj_ratio = brightness / self.max_brightness
+        ratio = adj_ratio ** (1 / self.brightness_power)
+        light_level = round(self.max_illuminance * ratio)
+        return max(min(light_level, self.max_illuminance), 0)
+
     def on_screens_change(self, display: ScreenBrightnessDBus):
         if display:
             self.display = display
             self.max_brightness = self.display.max_brightness
-            self.min_brightness = round(self.display.max_brightness * 0.05)
+            self.brightness_threshold_delta = round(self.max_brightness * 0.05)
             self.current_brightness = self.display.brightness
             self.display.connect_brightness_changed_signal(
                 self.handle_brightness_change
             )
-            self.logger.debug("Built-in display is enabled")
+            self.update_brightness_map()
+            self.logger.debug(
+                f"Display '{self.display.label}' is enabled, max_brightness={self.max_brightness}"
+            )
         else:
             self.display = None
             self.max_brightness = 0
-            self.min_brightness = 0
             self.current_brightness = 0
 
             self.lights = []
             self.light_event.set()
             self.logger.debug("Built-in display is disabled")
 
-    @property
-    def brightness_range(self):
-        return self.max_brightness - self.min_brightness
-
-    @property
-    def step(self):
-        return ceil(self.brightness_range / (self.fps * self.avg_period))
-
-    @property
-    def brightness_threshold_delta(self):
-        return round(self.brightness_range * 0.05)
-
     def get_recommended_brightness(self, bias=0):
-        if not self.brightness_range or self.twa < 0:
-            return self.current_brightness
+        value = self.display.brightness
 
-        ratio = self.twa / self.max_illuminance
-        adjusted_ratio = ratio**self.brightness_power
+        if not self.max_brightness or self.twa < 0:
+            return value
 
-        v = round(adjusted_ratio * self.brightness_range + self.min_brightness) + bias
-        return max(min(v, self.max_brightness), self.min_brightness)
+        for br, illum in self.light_to_brightness_map:
+            if self.twa <= illum:
+                value = br
+                break
+        else:
+            value = self.max_brightness
+
+        return max(min(value + bias, self.max_brightness), 0)
+
+    def report_light_level(self, value: int):
+        self.lights.append(Reading(ts=time.time(), val=value))
+        self.logger.debug(f"light_level={value}")
 
     def calc_time_weighted_avg(self):
+        value = 0
+
         if len(self.lights) > 1:
             weighted_sums = []
             for i, x in enumerate(self.lights):
@@ -126,72 +143,82 @@ class AutoBrightnessService:
                     weighted_sums.append(((x.val + prev.val) / 2) * (x.ts - prev.ts))
 
             t_all = [x.ts for x in self.lights]
-            return sum(weighted_sums) / (max(t_all) - min(t_all))
+            value = sum(weighted_sums) / (max(t_all) - min(t_all))
+        elif self.lights:
+            value = self.lights[0].val
         else:
-            return self.lights[0].val
+            value = self.sensor_proxy_dbus.light_level
 
-    def report_light_level(self, value: int):
-        now = time.time()
+        return round(value)
 
-        if self.lights and now - self.lights[-1].ts >= self.light_timeout:
-            value = self.lights[-1].val
+    def wait_recommended_brightness(self):
+        timeout = min(60, self.avg_period * (self.event_timeout_count + 1))
+        signaled = self.light_event.wait(timeout)
+        self.light_event.clear()
 
-        self.lights.append(Reading(ts=now, val=value))
+        if not signaled:
+            self.report_light_level(self.sensor_proxy_dbus.light_level)
 
-        ref_t = now - self.avg_period
-        self.lights = [x for x in self.lights if x.ts > ref_t] or self.lights[-1:]
-        prev_twa = self.twa
-        self.twa = round(self.calc_time_weighted_avg())
+        self.twa = self.calc_time_weighted_avg()
 
-        if abs(self.twa - prev_twa) > 1 or prev_twa < 0:
-            self.light_event.set()
+        # timeout reached, or received light reading during extended timeout
+        period_end = not signaled or self.event_timeout_count > 0
 
-        self.logger.debug(f"light_level={value}, light_avg={self.twa}")
+        if period_end:
+            t = self.lights[-1].ts - self.avg_period / 2
+            self.lights = [Reading(ts=t, val=self.twa)]
+
+        recomm_brightness = self.get_recommended_brightness(
+            bias=self.user_brightness_bias
+        )
+        brightness_diff = abs(recomm_brightness - self.display.brightness)
+        updated = (
+            brightness_diff >= self.brightness_threshold_delta
+            and not self.inhibited_by_powerdevil
+        )
+        self.event_timeout_count = 0 if updated else self.event_timeout_count + 1
+
+        self.logger.debug(
+            f"twa={self.twa}, {recomm_brightness=}, {signaled=}, {updated=}"
+        )
+
+        if updated:
+            return recomm_brightness
 
     def animate_brightness(self):
         while not self.stop_event.is_set():
             try:
-                avg_changing = self.lights and self.twa != self.lights[-1].val
-                timeout = self.light_timeout if avg_changing else 30.0
-
-                signaled = self.light_event.wait(timeout)
-                self.light_event.clear()
-
-                if self.twa < 0 or self.inhibited_by_powerdevil:
+                target = self.wait_recommended_brightness()
+                if target is None:
                     continue
 
-                if not signaled:
-                    self.report_light_level(self.sensor_proxy_dbus.light_level)
-
-                target = self.get_recommended_brightness(bias=self.user_brightness_bias)
                 start = self.current_brightness
                 delta = target - start
 
-                if abs(delta) > self.brightness_threshold_delta:
-                    frames = ceil(abs(delta) / self.step)
-                    frame_time = round(1 / min(frames, self.fps), 2)
-                    self.anim_bright_target = target
+                step = self.max_brightness * 0.005
+                frame_count = ceil(abs(delta) / step)
+                frame_time = round(self.avg_period / frame_count, 2)
+                self.anim_bright_target = target
 
-                    self.logger.debug(
-                        f"animate_brightness: {start=}, {target=}, {frames=}, {frame_time=}"
-                    )
+                self.logger.debug(f"{start=}, {target=}, {frame_count=}, {frame_time=}")
 
-                    for i in range(1, frames + 1):
-                        if self.light_event.is_set() or self.stop_event.is_set():
-                            self.anim_bright_target = None
-                            break
+                for i in range(1, frame_count + 1):
+                    if self.light_event.is_set() or self.stop_event.is_set():
+                        self.anim_bright_target = None
+                        break
 
-                        b = start + round(i * cpsign(self.step, delta))
+                    b = start + round(i * cpsign(step, delta))
 
-                        if (delta > 0 and b >= target) or (delta < 0 and b <= target):
-                            self.display.set_brightness(target)
-                            break
-                        else:
-                            self.display.set_brightness(b)
-                            time.sleep(frame_time)
+                    if (delta > 0 and b >= target) or (delta < 0 and b <= target):
+                        self.display.set_brightness(target)
+                        break
+                    else:
+                        self.display.set_brightness(b)
+                        time.sleep(frame_time)
+
             except dbus.exceptions.DBusException as e:
                 self.logger.exception(e)
-                time.sleep(self.light_timeout)
+                time.sleep(1.0)
 
     def handle_brightness_bias_clear(self, action, *args):
         if action == "undo":
@@ -241,3 +268,5 @@ class AutoBrightnessService:
             if "LightLevel" in changedProps:
                 val = int(changedProps["LightLevel"])
                 self.report_light_level(val)
+                if self.event_timeout_count > 0:
+                    self.light_event.set()
