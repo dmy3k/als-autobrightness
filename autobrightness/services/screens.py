@@ -27,6 +27,7 @@ class ScreenBrightnessDBus(DBusService):
         self.is_internal = bool(
             self.proxy.Get("org.kde.ScreenBrightness.Display", "IsInternal")
         )
+        self.label = str(self.proxy.Get("org.kde.ScreenBrightness.Display", "Label"))
 
     @property
     def brightness(self):
