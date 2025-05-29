@@ -57,7 +57,7 @@ class TestAutoBrightnessService(unittest.TestCase):
         self.service.light_timeout = 1.0
         self.service.brightness_power = 1.0
         self.service.user_brightness_bias = 0
-        self.service.inhibited_by_powerdevil = False
+        self.service.idle_dimmed = False
 
     def test_time_weighted_average_constant(self):
         """Test TWA calculation with constant light level"""

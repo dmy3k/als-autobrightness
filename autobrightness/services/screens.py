@@ -1,106 +1,70 @@
 import dbus
-import weakref
-
 from autobrightness.services.abstract import DBusService
+import glob
 
 
-class ScreenBrightnessDBus(DBusService):
-    def __init__(self, name: str, mngr: "ScreensDbus"):
-        super().__init__(dbus.SessionBus)
+class LoginSessDbus(DBusService):
+    def __init__(self) -> None:
+        super().__init__(dbus.SystemBus)
+        self.max_brightness = 0
+        self.device_name = None
 
-        self.name = name
-        self.mngr = mngr
-
-        self.proxy = self.bus.get_object(
-            "org.kde.Solid.PowerManagement",
-            f"/org/kde/ScreenBrightness/{self.name}",
+    def run(self):
+        self.proxy = self.try_get_object(
+            "org.freedesktop.login1",
+            "/org/freedesktop/login1/session/auto",
         )
+        self.iface = dbus.Interface(self.proxy, "org.freedesktop.login1.Session")
 
-        self.propsIface = dbus.Interface(self.proxy, "org.freedesktop.DBus.Properties")
-        self.brightnessIface = dbus.Interface(
-            self.proxy, "org.kde.ScreenBrightness.Display"
-        )
+        p = glob.glob("/sys/class/backlight/*/max_brightness")[0]
+        self.device_name = p.rsplit("/", 2)[1]
+        with open(p, "r") as fh:
+            self.max_brightness = int(fh.read().strip())
 
-        self.max_brightness = int(
-            self.proxy.Get("org.kde.ScreenBrightness.Display", "MaxBrightness")
-        )
-        self.is_internal = bool(
-            self.proxy.Get("org.kde.ScreenBrightness.Display", "IsInternal")
-        )
-        self.label = str(self.proxy.Get("org.kde.ScreenBrightness.Display", "Label"))
+    def set_brightness(self, value):
+        if int(value) >= 0:
+            self.iface.SetBrightness("backlight", self.device_name, value)
 
-    @property
-    def brightness(self):
-        v = self.proxy.Get("org.kde.ScreenBrightness.Display", "Brightness")
-        return int(v)
-
-    def set_brightness(self, value: int):
-        try:
-            self.brightnessIface.SetBrightness(value, 1)
-        except dbus.exceptions.DBusException as e:
-            if (
-                e.get_dbus_name() == "org.freedesktop.DBus.Error.UnknownObject"
-                and self.mngr is not None
-            ):
-                self.mngr.discover()
-            else:
-                raise
-
-    def connect_brightness_changed_signal(self, fn: callable):
-        self.propsIface.connect_to_signal("PropertiesChanged", fn)
+    def get_brightness(self):
+        with open(f"/sys/class/backlight/{self.device_name}/brightness") as fh:
+            return int(fh.read().strip())
 
 
 class ScreensDbus(DBusService):
     def __init__(self) -> None:
         super().__init__(dbus.SessionBus)
-
-        self._display: ScreenBrightnessDBus | None = None
-        self.on_internal_display_change: callable | None = None
+        self.login1 = LoginSessDbus()
+        self.max_brightness = 100
+        self.brightness_step = 1
+        self._cached_brightness = None
 
     def run(self):
         self.proxy = self.try_get_object(
-            "org.kde.Solid.PowerManagement",
-            "/org/kde/ScreenBrightness",
+            "org.gnome.SettingsDaemon.Power",
+            "/org/gnome/SettingsDaemon/Power",
         )
-        self.discover()
+        self.proxy.connect_to_signal(
+            "PropertiesChanged", self._on_brightness_change, sender_keyword="sender"
+        )
+        self.props = dbus.Interface(self.proxy, "org.freedesktop.DBus.Properties")
 
-        self.interface = dbus.Interface(self.proxy, "org.kde.ScreenBrightness")
-        self.interface.connect_to_signal("DisplayAdded", self.on_display_added)
-        self.interface.connect_to_signal("DisplayRemoved", self.on_display_removed)
-
-    def discover(self):
-        all_names = self.proxy.Get("org.kde.ScreenBrightness", "DisplaysDBusNames")
-        for name in all_names:
-            try:
-                displ = ScreenBrightnessDBus(str(name), weakref.proxy(self))
-                if displ.is_internal:
-                    self.internal_display = displ
-                    break
-            except Exception as e:
-                self.logger.warn(e)
-        else:
-            self.internal_display = None
+        self.login1.run()
+        self.max_brightness = self.login1.max_brightness
 
     @property
-    def internal_display(self):
-        return self._display
+    def brightness(self):
+        # return int(self.props.Set("org.gnome.SettingsDaemon.Power.Screen", "Brightness"))
+        if self._cached_brightness is None:
+            self._cached_brightness = self.login1.get_brightness()
+        return self._cached_brightness
 
-    @internal_display.setter
-    def internal_display(self, value: ScreenBrightnessDBus | None):
-        self._display = value
-        try:
-            if callable(self.on_internal_display_change):
-                self.on_internal_display_change(value)
-        except Exception as e:
-            self.logger.exception(e)
+    def set_brightness(self, value):
+        # self.props.Set("org.gnome.SettingsDaemon.Power.Screen", "Brightness", value)
+        self.login1.set_brightness(value)
 
-    def on_display_added(self, value, **kw):
-        if not self.internal_display:
-            added_displ = ScreenBrightnessDBus(str(value), weakref.proxy(self))
-            if added_displ.is_internal:
-                self.internal_display = added_displ
+    def _on_brightness_change(self, source, value, *args, **kw):
+        if source == "org.gnome.SettingsDaemon.Power.Screen":
+            self._cached_brightness = None
 
-    def on_display_removed(self, value, **kw):
-        name = str(value)
-        if self.internal_display and name == self.internal_display.name:
-            self.internal_display = None
+    def connect_props_changed_signal(self, fn: callable):
+        self.proxy.connect_to_signal("PropertiesChanged", fn, sender_keyword="sender")

@@ -1,6 +1,6 @@
 # Adaptive brightness service
 
-Adaptive brightness service for laptops running linux with KDE 6 desktop.
+Adaptive brightness service for laptops running linux with KDE 6 desktop or Gnome 48.
 The project serves the purpose in the absense of official support in KWin or PowerDevil.
 
 ## Highlights
@@ -25,7 +25,8 @@ sudo dnf install iio-sensor-proxy python3-pip python3-dbus git
 ## Install
 
 ```bash
-pip install --user git+https://github.com/dmy3k/als-autobrightness.git@main
+python3 -m ensurepip --default-pip
+pip install --user git+https://github.com/dmy3k/als-autobrightness.git@experimental_gnome_support
 autobrightnesscli --default-systemd-cfg > ~/.config/systemd/user/autobrightness.service
 systemctl --user enable --now autobrightness
 ```
@@ -33,7 +34,7 @@ systemctl --user enable --now autobrightness
 ## Upgrade
 
 ```bash
-pip install --user --upgrade git+https://github.com/dmy3k/als-autobrightness.git@main
+pip install --user --upgrade git+https://github.com/dmy3k/als-autobrightness.git@experimental_gnome_support
 systemctl --user restart autobrightness
 ```
 
