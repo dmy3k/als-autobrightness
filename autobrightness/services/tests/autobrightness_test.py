@@ -70,11 +70,11 @@ class TestAutoBrightnessService(unittest.TestCase):
         result = self.service.get_recommended_brightness()
 
         # Should be at maximum brightness
-        self.assertEqual(result, 8000)
+        self.assertEqual(result, self.service.max_brightness)
 
     def test_recommended_brightness_with_bias(self):
         """Test brightness calculation with user bias"""
-        self.service.current_light_level = 2000
+        self.service.current_light_level = 450
         bias = 1000
 
         baseline = self.service.get_recommended_brightness(bias=0)

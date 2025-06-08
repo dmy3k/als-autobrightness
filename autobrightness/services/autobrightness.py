@@ -37,13 +37,12 @@ class AutoBrightnessService:
         # Each tuple: (lower_bound, upper_bound, brightness_percent)
         self.brightness_buckets = [
             (0, 10, 10),
-            (8, 50, 20),
-            (40, 200, 30),
-            (160, 400, 40),
-            (320, 800, 50),
-            (640, 1600, 60),
-            (1280, 3200, 80),
-            (2560, 10000, 100),
+            (5, 50, 20),
+            (40, 300, 30),
+            (150, 400, 45),
+            (250, 650, 60),
+            (450, 2000, 75),
+            (1000, 10000, 100),
         ]
         self.current_bucket_idx = 0  # Start at the lowest bucket
 
@@ -163,10 +162,10 @@ class AutoBrightnessService:
                 self.anim_bright_target = target
 
                 self.logger.debug(f"{start=}, {target=}, {frame_count=}, {frame_time=}")
+                self.anim_abort_event.clear()
 
                 for i in range(1, frame_count + 1):
                     if self.anim_abort_event.is_set() or self.stop_event.is_set():
-                        self.anim_abort_event.clear()
                         self.logger.debug(f"aborted animation")
                         break
 
