@@ -6,8 +6,7 @@ import sys
 mock_dbus = Mock()
 sys.modules["dbus"] = mock_dbus
 
-import time
-from ..autobrightness import AutoBrightnessService, Reading
+from ..autobrightness import AutoBrightnessService
 
 
 class TestAutoBrightnessService(unittest.TestCase):
@@ -36,67 +35,38 @@ class TestAutoBrightnessService(unittest.TestCase):
         self.service.light_event = Mock()
         self.service.light_event.is_set.return_value = False
         self.service.light_event.wait.return_value = True
+        self.service.anim_abort_event = Mock()
+        self.service.anim_abort_event.is_set.return_value = False
+        self.service.anim_abort_event.wait.return_value = True
 
         # Mock display object and attributes
         self.mock_display = Mock()
         self.service.display = self.mock_display
         self.mock_display.set_brightness = Mock()
-        self.mock_display.max_brightness = 100
+        self.mock_display.max_brightness = 10000
         self.mock_display.brightness = 50
 
         # Mock display-related attributes
         self.service.brightness_threshold_delta = 5
-        self.service.max_brightness = 100
+        self.service.max_brightness = 10000
         self.service.current_brightness = 50
-        self.service.lights = []
-        self.service.twa = 0
+        self.service.current_light_level = 0
 
         # Setup test parameters
-        self.service.max_illuminance = 2000
-        self.service.fps = 5
-        self.service.avg_period = 1.0
-        self.service.light_timeout = 1.0
-        self.service.brightness_power = 1.0
         self.service.user_brightness_bias = 0
         self.service.inhibited_by_powerdevil = False
 
-    def test_time_weighted_average_constant(self):
-        """Test TWA calculation with constant light level"""
-        now = time.time()
-        self.service.lights = [
-            Reading(ts=now - 2, val=100),
-            Reading(ts=now - 1, val=100),
-            Reading(ts=now, val=100),
-        ]
-
-        result = self.service.calc_time_weighted_avg()
-        self.assertEqual(result, 100)
-
-    def test_time_weighted_average_varying(self):
-        """Test TWA calculation with varying light levels"""
-        now = time.time()
-        self.service.lights = [
-            Reading(ts=now - 2, val=100),
-            Reading(ts=now - 1, val=200),
-            Reading(ts=now, val=300),
-        ]
-
-        result = self.service.calc_time_weighted_avg()
-        # Average should be weighted by time intervals
-        self.assertAlmostEqual(result, 200.0)
-
     def test_recommended_brightness_min_light(self):
         """Test brightness calculation at minimum light level"""
-        self.service.twa = 0  # No light
-        self.service.update_brightness_map()
+        self.service.current_light_level = 0  # No light
         result = self.service.get_recommended_brightness()
 
         # Should be at minimum brightness
-        self.assertEqual(result, self.service.light_to_brightness_map[0][0])
+        self.assertEqual(result, 1000)
 
     def test_recommended_brightness_max_light(self):
         """Test brightness calculation at maximum light level"""
-        self.service.twa = self.service.max_illuminance
+        self.service.current_light_level = 2000
         result = self.service.get_recommended_brightness()
 
         # Should be at maximum brightness
@@ -104,15 +74,13 @@ class TestAutoBrightnessService(unittest.TestCase):
 
     def test_recommended_brightness_with_bias(self):
         """Test brightness calculation with user bias"""
-        self.service.twa = self.service.max_illuminance // 2
-        bias = 10
+        self.service.current_light_level = 450
+        bias = 1000
 
         baseline = self.service.get_recommended_brightness(bias=0)
         result = self.service.get_recommended_brightness(bias=bias)
 
-        # Result should be baseline + bias, but not exceed max_brightness
-        expected = min(baseline + bias, self.service.max_brightness)
-        self.assertEqual(result, expected)
+        self.assertEqual(result - baseline, bias)
 
 
 if __name__ == "__main__":

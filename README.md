@@ -8,7 +8,7 @@ The project serves the purpose in the absense of official support in KWin or Pow
 - Minimal number of dependencies
 - Requires ambient light sensor (ALS)
 - Efficient, utilizes sensor signals via dbus (no sensor polling)
-- Uses [time weighted average](https://www.timescale.com/blog/what-time-weighted-averages-are-and-why-you-should-care/) to smooth out brigtness changes
+- Uses bucketed brightness levels similar to ones [in windows 11](https://learn.microsoft.com/en-us/windows-hardware/design/device-experiences/sensors-adaptive-brightness)
 - Runs unpriviledged
 - Allows end-user to set brightness to the liking (offsetting adaptive brightness)
 - Tested with Fedora 40-42, KDE Plasma 6.2-6.3

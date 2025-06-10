@@ -1,7 +1,7 @@
 import dbus
 from threading import Timer
 from functools import partial
-
+import time
 from autobrightness.services.abstract import DBusService
 
 
@@ -10,6 +10,8 @@ class NotificationsDBus(DBusService):
         super().__init__(dbus.SessionBus)
         self.interface: dbus.Interface | None = None
         self.notif_id: int = 0
+        self.notif_timeout: int = 5
+        self.notif_shown_at: float = 0
         self.timer: Timer | None = None
 
     def run(self):
@@ -46,6 +48,9 @@ class NotificationsDBus(DBusService):
         self.timer.start()
 
     def _notify(self, title, body):
+        if self.notif_id and time.time() > self.notif_shown_at + self.notif_timeout:
+            self.interface.CloseNotification(self.notif_id)
+
         self.notif_id = self.interface.Notify(
             "autobrightness.service",
             self.notif_id,
@@ -54,5 +59,6 @@ class NotificationsDBus(DBusService):
             body,
             ["undo", "Undo"],
             {"urgency": 1, "resident": False},
-            5000,
+            self.notif_timeout * 1000,
         )
+        self.notif_shown_at = time.time()
