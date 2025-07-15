@@ -61,8 +61,8 @@ class TestAutoBrightnessService(unittest.TestCase):
         self.service.current_light_level = 0  # No light
         result = self.service.get_recommended_brightness()
 
-        # Should be at minimum brightness
-        self.assertEqual(result, 1000)
+        # Should be at minimum brightness (15% of 10000)
+        self.assertEqual(result, 1500)
 
     def test_recommended_brightness_max_light(self):
         """Test brightness calculation at maximum light level"""

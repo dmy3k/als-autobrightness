@@ -11,7 +11,7 @@ The project serves the purpose in the absense of official support in KWin or Pow
 - Uses bucketed brightness levels similar to ones [in windows 11](https://learn.microsoft.com/en-us/windows-hardware/design/device-experiences/sensors-adaptive-brightness)
 - Runs unpriviledged
 - Allows end-user to set brightness to the liking (offsetting adaptive brightness)
-- Tested with Fedora 40-42, KDE Plasma 6.2-6.3
+- Tested with Fedora 40-42, KDE Plasma 6.2-6.4
 
 ## Prerequisites
 

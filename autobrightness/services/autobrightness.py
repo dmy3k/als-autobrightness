@@ -33,19 +33,18 @@ class AutoBrightnessService:
         self.sensor_proxy_dbus = SensorProxyDBus()
         self.notif_dbus = NotificationsDBus()
 
-        # Windows 11-style overlapping buckets for hysteresis
+        # Optimized 5-level brightness buckets for stable operation
         # Each tuple: (lower_bound, upper_bound, brightness_percent)
+        # Wider overlaps reduce frequent brightness changes
         self.brightness_buckets = [
-            (0, 10, 10),
-            (5, 50, 20),
-            (40, 300, 30),
-            (150, 400, 40),
-            (250, 650, 50),
-            (450, 2000, 75),
-            (1000, 10000, 100),
+            (0, 50, 15),  # Night/Very dim - minimal brightness
+            (25, 200, 30),  # Dim indoor/Evening - low brightness
+            (150, 650, 50),  # Normal indoor/Office - comfortable brightness
+            (450, 2000, 75),  # Bright indoor/Near window - high brightness
+            (900, 10000, 100),  # Outdoor/Very bright - maximum brightness
         ]
 
-        # Start with brigtness close to 50%
+        # Start with brightness close to 50%
         i = len(self.brightness_buckets) - 1
         while i >= 0:
             l, u, val = self.brightness_buckets[i]
@@ -156,7 +155,7 @@ class AutoBrightnessService:
                 bucket_changed = recomm_brightness != self.current_brightness
 
                 if signaled and bucket_changed and self.anim_bright_target is None:
-                    if self.light_event.wait(1.0):
+                    if self.light_event.wait(2.0):
                         self.light_event.clear()
                         self.logger.debug(f"debounced")
                         continue
